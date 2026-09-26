@@ -48,12 +48,27 @@ python3 emb_knn.py $EMB train test
 #    writes ../output_v5a/{matching_results,candidate_pairs}.tsv   <- main submission
 python3 v5.py --work $WORK --knn_dir $EMB --out_root .. --extra 2
 
-# 5. (optional variant) label-shift correction for sibling look-alikes -> ../output_v5c/
-python3 sibling_prior.py $WORK ../output_v5c
+# 5. v6-v8: house-number edit-type features, candidate pruning, learned word-difference odds
+python3 v6.py --work $WORK --out ../output_v6
+python3 v7.py --work $WORK --out ../output_v7 --alpha 0.5
+python3 v8.py --work $WORK --out ../output_v8 --alpha 0.5
+python3 dev/loss_v7.py                      # writes train_cand_v7 / train_oof_v7 (inputs for step 6)
+
+# 6. cross-encoder (GPU): fine-tune xlm-roberta-base on uncertain train pairs, score uncertain test pairs
+python3 export_ce.py $WORK $EMB
+python3 cross_encoder.py $EMB train
+python3 export_ce_test.py $WORK $EMB
+python3 cross_encoder.py $EMB test
+
+# 7. v9 (v8 + cross-encoder feature) and the final v10r
+python3 v9.py  --work $WORK --emb $EMB --out ../output_v9
+python3 v10.py --work $WORK --emb $EMB --out ../output_v10      # adapts vocabulary for low-coverage countries
+python3 restore_exact.py $WORK ../output_v10 ../output_v7 ../output_v10r France
+#   alternative: python3 hybrid_coverage.py $WORK ../output_v9 ../output_v7 ../output_v9h
 
 # 6. validate
 python3 <student_resource>/utils/validate_submission.py \
-    --matching ../output_v5a/matching_results.tsv --candidate ../output_v5a/candidate_pairs.tsv \
+    --matching ../output_v10r/matching_results.tsv --candidate ../output_v10r/candidate_pairs.tsv \
     --test-dir $DATA/test
 ```
 
