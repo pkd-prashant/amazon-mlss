@@ -1,6 +1,6 @@
 # ML Challenge 2026: Business Entity Resolution Solution Template
 
-**Team Name:** [Your Team Name]  
+**Team Name:** Beyond Baseline  
 **Team Members:** Vaishnavi Goriga, Prashant Kumar Dubey, Neha Samanvitha Valiveti, Aayushi Raj  
 **Submission Date:** 27 September 2026
 
@@ -8,16 +8,18 @@
 
 ## 1. Executive Summary
 
-A CPU pipeline of rule-based, script-agnostic normalisation, *reverse* top-K blocking over compound
-blocking keys, and a LightGBM pair matcher with an exclusive "one record → at most one Source-1 entity"
-assignment. Each Source-2/3 record is linked to its single best Source-1 candidate, which keeps the
-candidate set at ≈ 4.7 records per Source-1 entity per retained rank (the theoretical minimum for this
-data is ≈ 4.7 records per entity in total). For records whose name is in an Indic script, a frozen
-LaBSE encoder (Apache-2.0) adds up to 2 cross-script candidates per record. No external data, lookups or
-APIs are used.
+A pipeline of script-agnostic normalisation, *reverse* top-K blocking over compound keys, LightGBM
+pair matching and a fine-tuned cross-encoder, with an exclusive "one record → at most one Source-1
+entity" assignment. Each Source-2/3 record keeps only its best blocking candidates, plus up to 2 LaBSE
+cross-script candidates for Indic-script names; candidates scoring below half of the record's best are
+pruned. This gives **9.3 candidates per Source-1 entity on test**.
 
-The final model reaches **macro F0.5 = 0.969 (out-of-fold, train)** with a blocking recall ceiling of
-96.7 % at 14.7 candidates per Source-1 entity.
+A 55-feature LightGBM (string, house-number edit-type, number coverage and learned word-difference
+features) is stacked with an `xlm-roberta-base` cross-encoder that scores uncertain pairs. For the
+country absent from training, the word statistics are adapted **transductively** from confident test
+predictions. No external data, lookups or APIs are used.
+
+**Public leaderboard: macro F0.5 = 0.9779** (train out-of-fold: 0.983 for US and India).
 
 ---
 
@@ -151,7 +153,14 @@ Effect on train:
 | train | top-2 | 95.6 % | 9.35 |
 | train | top-3 (used) | 96.2 % | 14.0 |
 | train | top-3 + 2 LaBSE (final) | **96.7 %** | 14.7 |
-| test | top-3 + 2 LaBSE (final) | – | 18.3 (31.6 M pairs) |
+| test | top-3 + 2 LaBSE | – | 18.3 (31.6 M pairs) |
+| train | **+ score-ratio pruning (final)** | **96.7 %** | **7.1** |
+| test | **+ score-ratio pruning (final)** | – | **9.3 (16.1 M pairs)** |
+
+**Candidate pruning.** A record keeps a lower-ranked blocking candidate only if its blocking score is at
+least 0.5 × the score of the record's best candidate; LaBSE candidates are always kept. On train this
+halves the candidate set (14.7 → 7.1 per entity) and costs only 0.01 % recall (96.69 % → 96.68 %),
+while the matcher's CV is unchanged (0.97254 → 0.97248).
 
 For comparison, all-pairs comparison within country would be about 10⁶ candidates per entity. The
 reduction ratio exceeds 99.998 %.
@@ -167,34 +176,68 @@ reduction ratio exceeds 99.998 %.
 
 ## 4. Matching Model
 
-**Features used (42 stage-1 features, all language-agnostic):**
+**Features used (55 LightGBM features plus a stacked cross-encoder score, all language-agnostic):**
 - **Name features:** Levenshtein ratio, token-set / token-sort / partial ratio (core and full names), best
   token-set ratio over alias parts, Jaro-Winkler on space-less names (web domains), skeleton ratio, token
   Jaccard, first-token equality, acronym match, name lengths, alias and website flags.
 - **Address features:** ratio / token-set / token-sort / partial ratio, address-word token-set ratio,
-  Jaccard and one-sided coverage, first-number equality, suffix-number match (1344 vs 344), whether the
-  first number appears among the other record's numbers, number-set Jaccard, number counts, empty-address
-  flags.
-- **Other features (competition among candidates):** blocking score, rank, margin to the record's best
-  candidate, gap between the record's 1st and 2nd candidates, number of candidates per record and per
-  Source-1 entity.
-- **Stage-2 group-consistency features:** for each Source-1 entity's candidate group, the probability
-  mass and count of other records that agree with this record's house number or name versus the Source-1
-  entity's own house number or name, plus rank and margin within the group. These separate the true
-  entity's records from a look-alike sibling's records.
+  Jaccard and one-sided coverage, first-number equality, suffix-number match, number-set Jaccard, counts,
+  empty-address flags.
+- **House-number edit type (v6):** same length, absolute and relative numeric difference, digit
+  Levenshtein, prefix / suffix / substring relation, first and last digit equality, and the minimum
+  Levenshtein distance over all numbers.
+  On train, a dropped leading digit (1344 → 344) is a true match 84 % of the time, but two numbers of the
+  same length differing by 3–50 (1817 vs 1808) only 4–11 % of the time. That is the signature of
+  "sibling" businesses.
+- **Number-set coverage (v8):** whether all of the Source-1 numbers appear in the record (noise numbers
+  are often *injected*, e.g. `76 C/O Himatshih …` vs `C/O Himatshih …`), plus extra-number counts.
+- **Learned word-difference odds (v8):** for the words that appear on only one side of a pair, the
+  log-odds of a true match are learned from training pairs *out-of-fold*. Filler words and typos
+  (`partners`, `sri`, `pirvnte`) come out harmless; content words (`garments`, `iron` vs `green`) mean a
+  different business. Features: sum / min / max / mean / count / unseen count.
+- **LaBSE cosine** for native-script records, and an embedding-candidate flag.
+- **Candidate competition:** blocking score, rank, margin to the record's best candidate, gap between the
+  record's 1st and 2nd candidates, candidates per record and per Source-1 entity.
+- **Cross-encoder score (v9):** `xlm-roberta-base` (MIT, 278 M parameters), fine-tuned on a V100 as a pair
+  classifier over `"<name> | <address>" [SEP] "<name> | <address>"`. It is trained on the 1.74 M train
+  pairs the LightGBM model is uncertain about (probability 0.02–0.98), using the same 2 entity-grouped
+  folds, so the stacked feature is out-of-fold. On these hard pairs it reaches **AUC 0.985**, against
+  0.931 for LightGBM. Test pairs in the same band (2.0 M) are scored by averaging the two fold models.
+  It becomes the #3 feature by gain.
 
-**Model type:** LightGBM binary classifier (MIT license), 400 rounds, 127 leaves, trained from scratch on
-the provided data, with 44 features (the 42 above plus LaBSE cosine and an embedding-candidate flag).
-LaBSE (Apache-2.0, ~471M parameters) is used frozen, only as a text encoder for candidate generation
-and one feature.
+**Model type:**
+- Stacked LightGBM binary classifier (MIT license), 400 rounds, 127 leaves, trained from scratch on the
+  provided data.
+- LaBSE (Apache-2.0) is used frozen for cross-script candidate retrieval.
+- `xlm-roberta-base` (MIT) is fine-tuned for pair scoring.
+- All models are well below the 8 B-parameter limit.
 
 **Threshold selection method:**
 - Validation is 2-fold out-of-fold, grouped by Source-1 entity, and scored with an exact re-implementation
   of the macro F0.5 (singletons included).
-- Each record is assigned to its highest-probability candidate, which enforces the one-entity-per-record
-  structure. It is accepted if the probability exceeds a threshold tuned for macro F0.5.
-- An alternative per-entity expected-F0.5 rule chooses the top-m records per entity (including m = 0)
-  that maximise expected F0.5.
+- Each record is assigned to its highest-probability candidate, which enforces one entity per record.
+- The acceptance rule is chosen on validation: a global threshold or a per-entity expected-F0.5 rule,
+  which picks the top-m records per entity, including m = 0.
+
+**Unseen country: transductive vocabulary adaptation (v10).**
+- The learned word odds covered only 51 % of the name words of the country absent from training (France),
+  versus 92–97 % elsewhere. Without adaptation the model mis-merged there.
+- For each country whose coverage is below 80 % (open set, selected automatically), word odds are
+  re-estimated from **pseudo-labels on the test inputs**: pairs the vocabulary-free model is very confident
+  about (p > 0.97 as the record's best candidate = match; p < 0.03 = non-match). 820 K positive and 1.37 M
+  negative pseudo-labels gave 16 K new word statistics and raised coverage to 96 %. Words seen in training
+  keep their training odds.
+- **Exact-identity restore:** candidates with an identical core name *and* an identical house number,
+  which are true matches 98.6 % of the time on train, are kept for adapted countries even if the adapted
+  model rejects them.
+- No test labels and no external data are involved.
+
+**Rejected alternatives (documented for transparency):**
+- A stage-2 model with self-supported group features raised CV but let "sibling" clusters vouch for
+  themselves on test (leaderboard 0.921).
+- MiniLM embeddings were far weaker than LaBSE.
+- Recovering empty-address records is mostly impossible, because their names are shared by 8 or more
+  Source-1 entities.
 
 ---
 
@@ -202,14 +245,18 @@ and one feature.
 
 | Version | Pipeline | OOF macro F0.5 (train) | Test assignments | Public LB |
 |---|---|---|---|---|
-| v1 | blocking + stage-1 LightGBM, global threshold | 0.9656 | 5.71 M | **0.956** |
-| v3 | + normalisation fixes + stage-2 group features + expected-F rule | 0.9743 | 6.26 M | 0.921 |
-| **v5a (final)** | blocking + LaBSE candidates + stage-1 LightGBM, expected-F rule | **0.9687** (US 0.976, India 0.957) | 5.67 M | **0.961** |
-| v5c (variant) | v5a + label-shift correction for sibling look-alikes | – | 5.64 M | 0.961 |
+| v1 | blocking + LightGBM, global threshold | 0.9656 | 5.71 M | 0.956 |
+| v3 | + stage-2 group features + expected-F rule | 0.9743 | 6.26 M | 0.921 |
+| v5a | + LaBSE candidates | 0.9687 | 5.67 M | 0.961 |
+| v7 | + house-number edit-type features + candidate pruning | 0.9725 | 5.70 M | – |
+| v8 | + number coverage + learned word-difference odds | 0.9773 | 5.77 M | – |
+| v9 | + cross-encoder stacked feature | 0.9828 (US 0.987, India 0.977) | 5.73 M | – |
+| **v10r (final)** | v9 + transductive vocabulary adaptation + exact-identity restore | 0.9828 | 5.72 M | **0.9779** |
 
-- **F_0.5 Score (macro), public leaderboard:** **0.961** for the final submission (v5a), up from 0.956
-  for the first version.
-- v5c (label-shift correction) tied at 0.961, so the simpler v5a is submitted as final.
+- **F_0.5 Score (macro), public leaderboard: 0.9779** (rank 410 at the time of submission).
+- Upper bound on train with our candidate set: a *perfect* matcher would score 0.989. The remaining gap is
+  about 0.6 points in the matcher and about 1.1 points in blocking recall (mostly empty-address records
+  with ambiguous names).
 
 - **Common false positives (wrong merges):** look-alike sibling businesses at the same street with a
   mutated house number (`287` vs `2870 Wiggles Ct`, `432` vs `4321 Yellow Rose Rd`); different businesses
@@ -255,15 +302,21 @@ What we changed as a result:
 
 ## 6. Conclusion
 
-The main lever in this challenge is **blocking**, because recall is the dominant loss (77 % of the
-out-of-fold F0.5 loss came from missed matches):
-
+**Blocking** built the foundation:
 - Compound, skeleton-based keys raised recall@1 from 86.6 % to 94.3 %.
-- The reverse, per-record formulation keeps the candidate set near the minimum possible size.
-- A frozen cross-lingual encoder closes most of the remaining gap for Indic-script names.
+- LaBSE closed most of the gap for Indic-script names.
+- Score-ratio pruning halved the candidate set to 9.3 per entity at no measurable recall cost.
 
-The main lesson is about **distribution shift**. The test set contains many more "sibling" look-alike
-businesses than train. Features that let a cluster of records vouch for itself raised validation F0.5
-but failed on test. Checking test-side statistics (assignment counts and the house-number-mismatch
-profile of changes) before trusting a validation gain would have caught this, and it is now part of the
-pipeline.
+The **matcher** then climbed from 0.956 to 0.978 on the leaderboard, driven by features that model *how*
+records differ, not just *how much*:
+- house-number edit types, which separate typos from sibling businesses;
+- learned word-difference odds, which separate filler words from content words;
+- a cross-encoder that reads both records together.
+
+Three lessons:
+1. Check test-side statistics before trusting a validation gain. A stage-2 model that looked better on
+   train failed on test because test contains many more sibling look-alikes.
+2. Measure vocabulary coverage when a country is absent from training, and adapt transductively from
+   confident predictions instead of hard-coding rules.
+3. Analyse the loss by oracle ("perfect matcher" vs "perfect blocking") to know where points are left.
+   For us, that is blocking recall for low-information records.

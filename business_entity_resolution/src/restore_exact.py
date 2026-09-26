@@ -3,14 +3,24 @@ adapted model: pairs with an identical core name AND an identical first house nu
 vocabulary-free model (v7) accepted.  On train this pattern is a true match 98.6 % of the time.
 A record already assigned elsewhere keeps its assignment (one entity per record).
 
-  python restore_exact.py <work> <base_out> <fallback_out> <out> <country...>
+  python restore_exact.py <work> <base_out> <fallback_out> <out> [min_coverage=0.8]
+
+Countries are chosen automatically: those whose test name words are covered by the training
+word-odds vocabulary less than min_coverage (the same criterion as v10.py; open set of labels).
 """
 import os, shutil, sys
 import pandas as pd
 from common import load_split
 
-W, BASE, FB, OUT = sys.argv[1:5]; COUNTRIES = set(sys.argv[5:])
+W, BASE, FB, OUT = sys.argv[1:5]
+MIN_COV = float(sys.argv[5]) if len(sys.argv) > 5 else 0.8
 s1, q = load_split(W, "test")
+V = set(pd.read_parquet(f"{W}/v8_word_odds.parquet").index)
+t = q[["n_full", "country"]].assign(t=q.n_full.str.split()).explode("t").dropna()
+t = t[t.t.str.len() > 1]
+cov = t.groupby("country").t.apply(lambda x: x.isin(V).mean())
+COUNTRIES = set(cov[cov < MIN_COV].index)
+print("vocabulary coverage:", cov.round(3).to_dict(), "| low-coverage:", sorted(COUNTRIES))
 S = s1.set_index("entity_id"); Q = q.set_index("entity_id")
 def load(p):
     m = pd.read_csv(f"{p}/matching_results.tsv", sep="\t", dtype=str, keep_default_na=False)
