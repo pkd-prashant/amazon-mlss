@@ -38,6 +38,7 @@ evidence below). If v5a scores below 0.956, keep v1 (`output/`) as the final.
 | v8 | not uploaded | – | v7 + learned word-difference odds + number coverage: CV **0.9773** (US 0.982, India 0.970); France additions look sibling-like (vocab coverage 51 %) |
 | v8h | not uploaded | – | v8 where learned vocabulary covers ≥ 80 % of name words (US, India), v7 elsewhere (France) |
 | **v9h** | _pending_ | ? | v8 + **cross-encoder** (xlm-roberta-base, AUC 0.985 vs 0.93 on hard pairs): CV **0.9828** for US/India; v7 fallback for France |
+| **v10r** | _pending_ | ? | v9 everywhere; France vocabulary self-trained from confident test pairs (coverage 51 % → 96 %) + exact-identity restore (98.6 % precise on train) |
 
 ## What happened overnight
 
