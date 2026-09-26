@@ -31,8 +31,9 @@ evidence below). If v5a scores below 0.956, keep v1 (`output/`) as the final.
 |---|---|---|---|
 | v1 | 03:30 | **0.956** | blocking + stage-1 LightGBM |
 | v3 | 05:31 | 0.921 | + normalisation fixes + stage-2 group features + expected-F rule |
-| v5a | _not yet_ | ? | blocking + **LaBSE candidates (V100)** + stage-1 LightGBM |
-| v5c | _not yet_ | ? | v5a + label-shift correction for sibling look-alikes |
+| v5a | 11:44 | **0.961** | blocking + **LaBSE candidates (V100)** + stage-1 LightGBM |
+| v5c | 11:46 | 0.961 | v5a + label-shift correction for sibling look-alikes (tie) |
+| v6 | _pending_ | ? | v5a + house-number edit-type features (CV 0.9725; fewer siblings, more dropped-digit matches) |
 
 ## What happened overnight
 
