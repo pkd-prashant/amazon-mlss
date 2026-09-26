@@ -34,7 +34,9 @@ evidence below). If v5a scores below 0.956, keep v1 (`output/`) as the final.
 | v5a | 11:44 | **0.961** | blocking + **LaBSE candidates (V100)** + stage-1 LightGBM |
 | v5c | 11:46 | 0.961 | v5a + label-shift correction for sibling look-alikes (tie) |
 | v6 | not uploaded | – | v5a + house-number edit-type features (CV 0.9725; fewer siblings, more dropped-digit matches) |
-| **v7** | _pending_ | ? | v6 + candidate pruning (score ≥ 0.5 × best): CV 0.9725, **9.3 cands/S1 on test (was 18.3)** |
+| v7 | not uploaded | – | v6 + candidate pruning (score ≥ 0.5 × best): CV 0.9725, **9.3 cands/S1 on test (was 18.3)** |
+| v8 | not uploaded | – | v7 + learned word-difference odds + number coverage: CV **0.9773** (US 0.982, India 0.970); France additions look sibling-like (vocab coverage 51 %) |
+| **v8h** | _pending_ | ? | v8 where learned vocabulary covers ≥ 80 % of name words (US, India), v7 elsewhere (France) |
 
 ## What happened overnight
 

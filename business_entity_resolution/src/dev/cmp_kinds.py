@@ -20,6 +20,9 @@ def kind(a, b):
 prior = {"equal": None, "same-len d<=2": .193, "same-len d3-50 (SIBLING)": .06, "same-len d>50": .52,
          "prefix (digit dropped end)": .715, "suffix (digit dropped front)": .843, "substring": .607, "other": .401, "missing-num": None}
 A, B = sys.argv[1], sys.argv[2]; PA, PB = pairs(A), pairs(B)
+if len(sys.argv) > 3:
+    keep = set(s1.entity_id.values[s1.country.values == sys.argv[3]])
+    PA = {p for p in PA if p[0] in keep}; PB = {p for p in PB if p[0] in keep}
 rows = {}
 for lab, ps in ((f"{B} adds", PB - PA), (f"{B} removes", PA - PB)):
     d = pd.DataFrame(list(ps), columns=["s", "q"])
