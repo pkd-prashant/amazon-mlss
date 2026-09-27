@@ -306,7 +306,7 @@ def normalize_address(raw):
         if c2 in US_STATES or c2 in IN_STATES or c2 in _STATE_CODES or c2 in _FR_ADMIN or c2.replace(" ", "") in IN_STATES or skeleton(c2).replace(" ", "") in _STATE_SKEL:
             continue
         for t in c2.split():
-            t = fix_leet(t) if not any(ch.isdigit() for ch in t[:1]) else t
+            t = fix_leet(t) if not any(ch.isdigit() for ch in t) else t
             t = ORDINALS.get(t, t)
             t = ADDR_CANON.get(t, t)
             if t in ADDR_STOP:
